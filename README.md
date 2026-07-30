@@ -237,6 +237,57 @@ Common quick fixes before reporting:
 4. Launch `Local Chat Viewer` from the Start Menu or desktop shortcut.
 5. Complete the first-run checks for Claude Code, Codex CLI, and writable logs.
 
+## macOS Beta Port
+
+The macOS port is source-based for the first test round. It does not use a `.dmg` yet; build a packaged Mac installer only after a tester confirms the basic Terminal flow works on a real Mac.
+
+From the project folder on macOS, make the scripts executable:
+
+```bash
+chmod +x scripts/macos/*.sh
+```
+
+Install or verify Node.js, Claude Code, and Codex CLI:
+
+```bash
+./scripts/macos/setup-prerequisites.sh
+```
+
+Optional flags:
+
+```bash
+./scripts/macos/setup-prerequisites.sh --skip-login-prompts
+./scripts/macos/setup-prerequisites.sh --skip-node-install
+./scripts/macos/setup-prerequisites.sh --skip-claude-install
+./scripts/macos/setup-prerequisites.sh --skip-codex-install
+```
+
+Install the local source copy and launcher scripts:
+
+```bash
+./scripts/macos/install.sh
+```
+
+Open one Terminal window for the viewer:
+
+```bash
+~/.local/bin/local-chat-viewer
+```
+
+Open a second Terminal window for the trigger worker:
+
+```bash
+~/.local/bin/local-chat-viewer-trigger
+```
+
+Then open the viewer URL shown by the server, send a test message, and confirm Claude and Codex both append replies to the same log. If `~/.local/bin` is not on PATH, run the launchers by full path as shown above or add this to `~/.zshrc`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The experimental macOS SEA build script is available at `scripts/macos/build-sea.sh`, but do not treat its output as release-ready until it is built and tested on macOS.
+
 ## Logs
 
 User chat logs and trigger state are stored under:
