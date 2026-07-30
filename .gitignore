@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output (installer exe is published via GitHub Releases, not the repo)
+dist/
+
+# Conversation logs and trigger/server runtime data (private)
+logs/
+*.log
+.trigger-state.json
+
+# Secrets
+.env
+.env.*
+
+# Local agent/session data
+.agents/
+
+# OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store

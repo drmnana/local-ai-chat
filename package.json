@@ -1,0 +1,32 @@
+{
+  "name": "local-chat-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "trigger": "node trigger.js",
+    "build:exe": "pkg server.js --targets node18-win-x64 --output dist/local-chat-viewer.exe",
+    "build:sea": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build-sea.ps1",
+    "build:installer": "iscc installer/local-chat-viewer.iss"
+  },
+  "pkg": {
+    "assets": [
+      "index.html",
+      "claude-reply.ps1",
+      "start-trigger.ps1"
+    ],
+    "scripts": [
+      "trigger.js"
+    ]
+  },
+  "dependencies": {
+    "express": "^4.18.3",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.5.1",
+    "esbuild": "^0.25.0",
+    "postject": "^1.0.0-alpha.6"
+  }
+}
