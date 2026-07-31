@@ -110,6 +110,31 @@ EOF
   ok "Node.js and npm are available."
 }
 
+ensure_npm_prefix() {
+  local prefix
+  prefix="$(npm config get prefix 2>/dev/null || true)"
+  [ -n "$prefix" ] || prefix="/usr/local"
+
+  if [ -w "$prefix/lib/node_modules" ]; then
+    return
+  fi
+  if [ ! -e "$prefix/lib/node_modules" ] && [ -w "$prefix/lib" ]; then
+    return
+  fi
+
+  step "Configuring npm to install global packages in your home folder"
+  echo "The default npm folder ($prefix) needs admin rights, so global installs go to ~/.npm-global instead."
+  mkdir -p "$HOME/.npm-global"
+  run_checked npm config set prefix "$HOME/.npm-global"
+  ensure_shell_path
+
+  if ! grep -qs '\.npm-global/bin' "$HOME/.zshrc" 2>/dev/null; then
+    printf '\nexport PATH="$HOME/.npm-global/bin:$PATH"\n' >> "$HOME/.zshrc"
+    ok "Added ~/.npm-global/bin to PATH in ~/.zshrc"
+  fi
+  ok "npm global installs now go to ~/.npm-global (no admin password needed)."
+}
+
 ensure_claude() {
   step "Installing or updating Claude Code"
   ensure_shell_path
@@ -183,6 +208,7 @@ EOF
 }
 
 ensure_node
+ensure_npm_prefix
 ensure_claude
 ensure_codex
 run_login_prompts
