@@ -9,7 +9,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "Node.js/npm not found. Running prerequisite setup first..."
-  "$root/scripts/macos/setup-prerequisites.sh"
+  bash "$root/scripts/macos/setup-prerequisites.sh"
   export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
 fi
 
