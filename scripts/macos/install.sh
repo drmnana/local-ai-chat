@@ -7,11 +7,9 @@ bin_dir="$HOME/.local/bin"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "Node.js/npm not found. Running prerequisite setup first..."
-  bash "$root/scripts/macos/setup-prerequisites.sh"
-  export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
-fi
+echo "Checking Node.js, Claude Code, Codex CLI, and login setup..."
+bash "$root/scripts/macos/setup-prerequisites.sh"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "npm is still not available. Install Node.js LTS from https://nodejs.org/, open a new Terminal, and rerun this script." >&2

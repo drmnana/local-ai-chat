@@ -24,6 +24,21 @@ const fileWatchers = new Map();
 const runningAgents = new Set();
 const runningChildren = new Map();
 const CODEX_COMMAND = process.platform === "win32" ? "powershell.exe" : "codex";
+const EXTRA_PATH_DIRS =
+  process.platform === "win32"
+    ? []
+    : [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        path.join(process.env.HOME || "", ".npm-global", "bin"),
+        path.join(process.env.HOME || "", ".local", "bin"),
+      ];
+
+function extendedPath() {
+  const current = process.env.PATH || "";
+  const missing = EXTRA_PATH_DIRS.filter((dir) => !current.split(path.delimiter).includes(dir));
+  return missing.length ? [...missing, current].join(path.delimiter) : current;
+}
 
 fs.mkdirSync(LOG_FOLDER, { recursive: true });
 
@@ -80,6 +95,7 @@ function unwatchFile(fileName) {
 function commandEnv(fileName, message) {
   return {
     ...process.env,
+    PATH: extendedPath(),
     CHAT_FILE: filePath(fileName),
     CHAT_FILE_NAME: fileName,
     CHAT_AUTHOR: message.author,
