@@ -56,6 +56,20 @@ ensure_shell_path() {
   export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
 }
 
+install_node_pkg() {
+  step "Downloading the official Node.js LTS installer"
+  local index version pkg_path
+  index="$(curl -fsSL https://nodejs.org/dist/index.json)" || return 1
+  version="$(printf '%s' "$index" | tr '}' '\n' | grep -m1 '"lts":"' | sed -E 's/.*"version":"([^"]+)".*/\1/')"
+  [ -n "$version" ] || return 1
+  pkg_path="$(mktemp -d)/node-${version}.pkg"
+  run_checked curl -fL "https://nodejs.org/dist/${version}/node-${version}.pkg" -o "$pkg_path" || return 1
+  step "Installing Node.js ${version}"
+  echo "The macOS Installer will open now. Complete it (your admin password is required)."
+  echo "This script waits for the installer to finish, then continues automatically."
+  open -W "$pkg_path"
+}
+
 ensure_node() {
   step "Checking Node.js and npm"
   ensure_shell_path
@@ -76,14 +90,21 @@ ensure_node() {
     step "Installing Node.js with Homebrew"
     run_checked brew install node
   else
-    cat >&2 <<'EOF'
-Node.js or npm is missing and Homebrew is not installed.
+    if ! install_node_pkg; then
+      cat >&2 <<'EOF'
+Could not download the Node.js installer automatically.
 Install Node.js LTS from https://nodejs.org/, open a new Terminal window, then rerun this script.
 EOF
-    exit 1
+      exit 1
+    fi
   fi
 
   ensure_shell_path
+  hash -r 2>/dev/null || true
+  if ! have node || ! have npm; then
+    echo "Node.js is still not found. If the installer completed, open a new Terminal window and rerun this script." >&2
+    exit 1
+  fi
   run_checked node --version
   run_checked npm --version
   ok "Node.js and npm are available."
