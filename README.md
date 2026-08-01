@@ -237,56 +237,55 @@ Common quick fixes before reporting:
 4. Launch `Local Chat Viewer` from the Start Menu or desktop shortcut.
 5. Complete the first-run checks for Claude Code, Codex CLI, and writable logs.
 
-## macOS Beta Port
+## macOS Beta Install
 
-The macOS port is source-based for the first test round. It does not use a `.dmg` yet; build a packaged Mac installer only after a tester confirms the basic Terminal flow works on a real Mac.
+The macOS port is source-based for the first test round (no `.dmg` yet). The whole setup is one script plus two launch commands. These steps were verified end to end on a real Mac.
 
-From the project folder on macOS, make the scripts executable:
+### One-time setup (about 10 minutes)
 
-```bash
-chmod +x scripts/macos/*.sh
-```
+1. **Download the project.** On the GitHub page choose `Code` > `Download ZIP`, then double-click the ZIP in Downloads to unzip it. (Or `git clone` if you use git.)
+2. **Open Terminal in the project folder.** Open Terminal, type `cd ` (with a space after it), drag the unzipped folder from Finder onto the Terminal window, and press Enter. Every command below assumes you are in this folder.
+3. **Run the installer:**
 
-Install or verify Node.js, Claude Code, and Codex CLI:
+   ```bash
+   bash scripts/macos/install.sh
+   ```
 
-```bash
-./scripts/macos/setup-prerequisites.sh
-```
+   One script does everything: it checks for Node.js and installs it if missing, installs or updates Claude Code and Codex CLI, walks you through both logins, verifies both CLIs answer, copies the app to `~/Applications/Local Chat Viewer`, and creates the two launcher commands in `~/.local/bin`.
 
-Optional flags:
+4. **Complete the two logins when prompted.** The installer opens the real Claude Code app in your terminal on purpose - this is the login step, not a hang. Sign in if asked (a browser window may open), then type `/exit` and press Enter to return to the installer. It then does the same for Codex: sign in with ChatGPT, then exit. The installer resumes automatically and finishes with a "setup is complete" style message.
 
-```bash
-./scripts/macos/setup-prerequisites.sh --skip-login-prompts
-./scripts/macos/setup-prerequisites.sh --skip-node-install
-./scripts/macos/setup-prerequisites.sh --skip-claude-install
-./scripts/macos/setup-prerequisites.sh --skip-codex-install
-```
+### Running it (every time)
 
-Install the local source copy and launcher scripts:
+Open two Terminal windows and leave both running:
 
-```bash
-./scripts/macos/install.sh
-```
+- **Terminal 1 - backend + viewer** (this IS the server; there is no separate backend to start):
 
-Open one Terminal window for the viewer:
+  ```bash
+  ~/.local/bin/local-chat-viewer
+  ```
 
-```bash
-~/.local/bin/local-chat-viewer
-```
+- **Terminal 2 - trigger worker** (launches Claude and Codex when messages arrive):
 
-Open a second Terminal window for the trigger worker:
+  ```bash
+  ~/.local/bin/local-chat-viewer-trigger
+  ```
 
-```bash
-~/.local/bin/local-chat-viewer-trigger
-```
+  Wait for `Trigger watcher running` and the lines showing the built-in claude and codex launchers.
 
-Then open the viewer URL shown by the server, send a test message, and confirm Claude and Codex both append replies to the same log. If `~/.local/bin` is not on PATH, run the launchers by full path as shown above or add this to `~/.zshrc`:
+Then open `http://localhost:3000` in your browser, start a conversation, and send a test message like `hello both`. Terminal 2 should show `[trigger:claude]` and `[trigger:codex]` lines with no errors, and both replies should appear in the chat.
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
+**Known limitation:** the page does not auto-refresh yet - reload the browser tab to see new replies. Live polling is planned.
 
-The experimental macOS SEA build script is available at `scripts/macos/build-sea.sh`, but do not treat its output as release-ready until it is built and tested on macOS.
+### macOS Troubleshooting
+
+- **`install.sh: No such file or directory`** - Terminal is not inside the project folder. Type `cd ` (with a space) and drag the project folder onto Terminal, press Enter, then rerun the command. Alternatively type `bash ` and drag the `install.sh` file itself onto Terminal.
+- **Claude "takes over" the terminal during install** - expected; that is the login step. Sign in, then type `/exit` (or press `Ctrl+C` twice) to hand control back to the installer.
+- **Send button does nothing in the browser** - check the address bar reads `http://localhost:3000`, not `file://...` (the raw HTML file cannot talk to the server), and confirm Terminal 1 is still running the viewer.
+- **`spawn codex ENOENT` or `No such file` errors in Terminal 2** - you are running an old copy. Re-download the ZIP (or `git pull`), rerun `bash scripts/macos/install.sh`, and restart both terminals.
+- **`command not found` for the launchers** - use the full paths shown above, or add `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc` and open a new Terminal.
+
+Advanced: `install.sh` runs `scripts/macos/setup-prerequisites.sh` automatically; you only need to run it directly if you want its skip flags (`--skip-login-prompts`, `--skip-node-install`, `--skip-claude-install`, `--skip-codex-install`). The experimental macOS SEA build script at `scripts/macos/build-sea.sh` is not release-ready until built and tested on macOS.
 
 ## Logs
 
