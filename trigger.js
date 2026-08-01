@@ -14,6 +14,13 @@ const DATA_FOLDER =
 const LOG_FOLDER = process.env.CHAT_LOG_FOLDER || path.join(DATA_FOLDER, "logs");
 
 const STATE_FILE = path.join(DATA_FOLDER, ".trigger-state.json");
+const LOCK_STALE_MS = Number(process.env.TRIGGER_LOCK_STALE_MS || 10 * 60 * 1000);
+const WATCHDOG_ENABLED = process.env.WATCHDOG_ENABLED === "1";
+const WATCHDOG_ADMIN_AGENT = (process.env.WATCHDOG_ADMIN_AGENT || "codex").toLowerCase();
+const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WATCHDOG_INTERVAL_MS || 5 * 60 * 1000), 60 * 1000);
+const WATCHDOG_CONTEXT_MESSAGES = Math.max(Number(process.env.WATCHDOG_CONTEXT_MESSAGES || 12), 1);
+const WATCHDOG_SUMMARY_FILE = process.env.WATCHDOG_SUMMARY_FILE || path.join(LOG_FOLDER, ".project-summary.md");
+const WATCHDOG_FILE = process.env.WATCHDOG_FILE || "";
 const AGENTS = {
   codex: process.env.CODEX_TRIGGER_CMD || "",
   claude: process.env.CLAUDE_TRIGGER_CMD || "",
@@ -24,6 +31,7 @@ const fileWatchers = new Map();
 const runningAgents = new Set();
 const runningChildren = new Map();
 const CODEX_COMMAND = process.platform === "win32" ? "powershell.exe" : "codex";
+let watchdogTimer = null;
 const EXTRA_PATH_DIRS =
   process.platform === "win32"
     ? []
@@ -104,6 +112,50 @@ function commandEnv(fileName, message) {
   };
 }
 
+function agentLockPath(agent) {
+  return path.join(DATA_FOLDER, `.trigger-${agent}.lock`);
+}
+
+function tryAcquireAgentLock(agent) {
+  if (runningAgents.has(agent)) {
+    console.log(`[trigger:${agent}] skipped; ${agent} is already running`);
+    return null;
+  }
+
+  const lockPath = agentLockPath(agent);
+  try {
+    const stats = fs.statSync(lockPath);
+    if (Date.now() - stats.mtimeMs > LOCK_STALE_MS) {
+      fs.unlinkSync(lockPath);
+    } else {
+      console.log(`[trigger:${agent}] skipped; lock exists at ${lockPath}`);
+      return null;
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.log(`[trigger:${agent}] skipped; could not inspect lock: ${error.message}`);
+      return null;
+    }
+  }
+
+  try {
+    const handle = fs.openSync(lockPath, "wx");
+    fs.writeFileSync(handle, `${JSON.stringify({ pid: process.pid, agent, time: new Date().toISOString() })}\n`);
+    fs.closeSync(handle);
+    runningAgents.add(agent);
+  } catch (error) {
+    console.log(`[trigger:${agent}] skipped; could not acquire lock: ${error.message}`);
+    return null;
+  }
+
+  return () => {
+    runningAgents.delete(agent);
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {}
+  };
+}
+
 function triggerAgents(fileName, message) {
   for (const [agent, command] of Object.entries(AGENTS)) {
     if (message.author === agent) continue;
@@ -122,7 +174,11 @@ function triggerAgents(fileName, message) {
 
     if (!command) continue;
 
+    const release = tryAcquireAgentLock(agent);
+    if (!release) continue;
+
     exec(command, { env: commandEnv(fileName, message) }, (error, stdout, stderr) => {
+      release();
       if (stdout) process.stdout.write(stdout);
       if (stderr) process.stderr.write(stderr);
       if (error) {
@@ -158,13 +214,37 @@ function triggerPrompt(agent, fileName, message) {
   ].join("\n");
 }
 
-function runCodex(fileName, message) {
-  if (runningAgents.has("codex")) {
-    console.log("[trigger:codex] skipped; Codex is already running");
+function watchdogPrompt(agent, fileName, message) {
+  return [
+    `You are ${agent} acting as the admin watchdog for a shared append-only JSONL chat log.`,
+    "",
+    `Shared log: ${filePath(fileName)}`,
+    `Project summary path: ${WATCHDOG_SUMMARY_FILE}`,
+    `Read policy: read the project summary if it exists, then read only the last ${WATCHDOG_CONTEXT_MESSAGES} readable JSONL messages unless more context is required to confirm a stall.`,
+    "",
+    "Newest message at watchdog wake:",
+    `author: ${message.author}`,
+    `time: ${message.time}`,
+    `text: ${message.text}`,
+    "",
+    "Rules:",
+    "- You are the only agent woken by this watchdog interval.",
+    "- Check for expected artifacts or clear progress, not just chat activity.",
+    "- If work is progressing or there is no actionable stall, do nothing and append nothing.",
+    "- If work is stalled, append exactly one JSON line to the shared log that names the stalled owner, expected artifact, and next action.",
+    "- The JSON object must have: time, author, text.",
+    `- Use author "${agent}".`,
+    "- Use the current UTC ISO time.",
+    "- Never rewrite, truncate, or overwrite the file. Append only.",
+    "- Keep any appended escalation concise and natural.",
+  ].join("\n");
+}
+
+function runCodex(fileName, message, prompt = triggerPrompt("codex", fileName, message)) {
+  const release = tryAcquireAgentLock("codex");
+  if (!release) {
     return;
   }
-
-  runningAgents.add("codex");
 
   const child = spawn(
     CODEX_COMMAND,
@@ -183,7 +263,7 @@ function runCodex(fileName, message) {
           "--skip-git-repo-check",
           "--sandbox",
           "workspace-write",
-          triggerPrompt("codex", fileName, message),
+          prompt,
         ]
       : [
       "exec",
@@ -194,7 +274,7 @@ function runCodex(fileName, message) {
       "--skip-git-repo-check",
       "--sandbox",
       "workspace-write",
-      triggerPrompt("codex", fileName, message),
+      prompt,
         ],
     {
       cwd: __dirname,
@@ -216,24 +296,21 @@ function runCodex(fileName, message) {
   });
   child.on("error", (error) => {
     console.error(`[trigger:codex] failed to start: ${error.message}`);
+    release();
   });
   child.on("close", (code) => {
     clearTimeout(timeout);
-    runningAgents.delete("codex");
+    release();
     runningChildren.delete("codex");
     console.log(`[trigger:codex] exited with code ${code}`);
   });
 }
 
-function runClaude(fileName, message) {
-  if (runningAgents.has("claude")) {
-    console.log("[trigger:claude] skipped; Claude is already running");
+function runClaude(fileName, message, prompt = triggerPrompt("claude", fileName, message)) {
+  const release = tryAcquireAgentLock("claude");
+  if (!release) {
     return;
   }
-
-  runningAgents.add("claude");
-
-  const prompt = triggerPrompt("claude", fileName, message);
 
   const child = spawn(
     "claude",
@@ -266,13 +343,55 @@ function runClaude(fileName, message) {
   });
   child.on("error", (error) => {
     console.error(`[trigger:claude] failed to start: ${error.message}`);
+    release();
   });
   child.on("close", (code) => {
     clearTimeout(timeout);
-    runningAgents.delete("claude");
+    release();
     runningChildren.delete("claude");
     console.log(`[trigger:claude] exited with code ${code}`);
   });
+}
+
+async function readRecentMessages(fileName, limit) {
+  const text = await fs.promises.readFile(filePath(fileName), "utf8").catch(() => "");
+  return text
+    .split(/\r?\n/)
+    .map(parseLine)
+    .filter(Boolean)
+    .slice(-limit);
+}
+
+async function watchdogTick() {
+  if (!WATCHDOG_ENABLED) return;
+  if (!Object.prototype.hasOwnProperty.call(AGENTS, WATCHDOG_ADMIN_AGENT)) {
+    console.error(`[watchdog] unsupported admin agent: ${WATCHDOG_ADMIN_AGENT}`);
+    return;
+  }
+
+  const files = WATCHDOG_FILE
+    ? [WATCHDOG_FILE].filter(isJsonlFile)
+    : Array.from(fileStates.keys()).filter(isJsonlFile);
+
+  for (const fileName of files) {
+    const recent = await readRecentMessages(fileName, WATCHDOG_CONTEXT_MESSAGES);
+    const latest = recent[recent.length - 1];
+    if (!latest || latest.author === WATCHDOG_ADMIN_AGENT) continue;
+
+    const message = {
+      author: latest.author,
+      time: new Date().toISOString(),
+      text: `Admin watchdog interval elapsed. Latest readable message: ${latest.author} at ${latest.time}: ${latest.text}`,
+    };
+    const prompt = watchdogPrompt(WATCHDOG_ADMIN_AGENT, fileName, latest);
+    console.log(`[watchdog:${WATCHDOG_ADMIN_AGENT}] checking ${fileName}`);
+
+    if (WATCHDOG_ADMIN_AGENT === "codex") {
+      runCodex(fileName, message, prompt);
+    } else if (WATCHDOG_ADMIN_AGENT === "claude") {
+      runClaude(fileName, message, prompt);
+    }
+  }
 }
 
 async function readAppendedLines(fileName) {
@@ -390,7 +509,16 @@ async function startTriggerWatcher() {
     await scanFolder(loadSavedState());
   });
 
+  if (WATCHDOG_ENABLED) {
+    watchdogTimer = setInterval(() => {
+      watchdogTick().catch((error) => {
+        console.error(`[watchdog] failed: ${error.message}`);
+      });
+    }, WATCHDOG_INTERVAL_MS);
+  }
+
   process.on("SIGINT", () => {
+    if (watchdogTimer) clearInterval(watchdogTimer);
     folderWatcher.close();
     for (const watcher of fileWatchers.values()) {
       watcher.close();
@@ -402,6 +530,9 @@ async function startTriggerWatcher() {
   console.log(`Logs: ${LOG_FOLDER}`);
   console.log("Claude trigger: built-in claude -p launcher");
   console.log("Codex trigger: built-in codex exec launcher");
+  if (WATCHDOG_ENABLED) {
+    console.log(`Admin watchdog: ${WATCHDOG_ADMIN_AGENT} every ${WATCHDOG_INTERVAL_MS}ms`);
+  }
 }
 
 module.exports = { startTriggerWatcher };
